@@ -549,7 +549,8 @@ func (s *SmartContract) logout(APIstub shim.ChaincodeStubInterface, args []strin
 		return shim.Error("Incorrect number of arguments, required 1, given "+strconv.Itoa(len(args)))
 	}
 
-	key := args[0]
+	token := args[0]
+	key := s.getKeyFromToken(APIstub, token)
 	var user User
 
 	jsonUser, err := APIstub.GetState(key)
