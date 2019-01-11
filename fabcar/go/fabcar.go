@@ -103,7 +103,7 @@ type CouchQueryBuilder struct {
 	End string
 }
 
-func newCouchQueryBuilder() (*CouchQueryBuilder) {
+func newCouchQueryBuilder() *CouchQueryBuilder {
 	return &CouchQueryBuilder{Start:"{", SelectorStart:"\"selector\":{", SelectorBody:"", SelectorEnd:"}", End:"}"}
 }
 
