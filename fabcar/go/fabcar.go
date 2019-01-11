@@ -81,12 +81,6 @@ type Request struct {
 	SignStatus bool
 }
 
-type Person struct {
-	FirstName string
-	LastName  string
-	Age       int
-}
-
 type CouchQueryBuilder struct {
 	Start string
 	SelectorStart string
@@ -607,8 +601,6 @@ func (s *SmartContract) login(APIstub shim.ChaincodeStubInterface, args []string
 
 	value := string(jsonData)
 
-
-
 	// Take substring of first word with runes.
 	// ... This handles any kind of rune in the string.
 	runes := []rune(value)
@@ -638,60 +630,6 @@ func (s *SmartContract) login(APIstub shim.ChaincodeStubInterface, args []string
 	jsonResult:= fmt.Sprintf("{\"token\" : \"%s\" , \"key\" : \"%s\"}", token, key)
 
 	return shim.Success([]byte(jsonResult))
-}
-
-func (s *SmartContract) getObject(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-
-	if len(args) != 1 {
-		return shim.Error("Incorrect number of arguments. Expecting 1")
-	}
-
-	key := args[0]
-
-	objectData, err:= APIstub.GetState(key)
-	if err != nil {
-		return shim.Error("getting object failed: " + err.Error())
-	}
-
-	var person1 Person
-	err = json.Unmarshal(objectData, &person1)
-	if err != nil {
-		return shim.Error("UnMarshal failed: " + err.Error())
-	}
-
-	//print(person1.FirstName + " " + person1.LastName)
-
-	return shim.Success(objectData)
-}
-
-func (s *SmartContract) putObject(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-
-	if len(args) != 4 {
-		return shim.Error("Incorrect number of arguments. Expecting 4")
-	}
-
-	key := args[0]
-	firstName := args[1]
-	lastName := args[2]
-	age := args[3]
-
-	ageInt, err := strconv.Atoi(age)
-	if err != nil {
-		return shim.Error("Interger conversion failed: " + err.Error())
-	}
-
-	p := Person{firstName, lastName, ageInt}
-
-	pJson, err := json.Marshal(p)
-
-	err = APIstub.PutState(key, pJson)
-	if err != nil {
-		return shim.Error("Putting object failed: " + err.Error())
-	}
-
-	ret := "putting object successful ;-) "
-
-	return shim.Success([]byte(ret))
 }
 
 func (s *SmartContract) getData(APIstub shim.ChaincodeStubInterface, args ...string) sc.Response {
@@ -743,16 +681,6 @@ func (s *SmartContract) setData(APIstub shim.ChaincodeStubInterface, args []stri
 	str := "operation successful"
 
 	return shim.Success([]byte(str))
-}
-
-func (s *SmartContract) queryCar(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-
-	if len(args) != 1 {
-		return shim.Error("Incorrect number of arguments. Expecting 1")
-	}
-
-	carAsBytes, _ := APIstub.GetState(args[0])
-	return shim.Success(carAsBytes)
 }
 
 func MockInvoke(stub *shim.MockStub, function string, args []string) sc.Response {
