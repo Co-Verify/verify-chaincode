@@ -190,10 +190,6 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.getDataFromArgs(APIstub, args)
 	} else if function == "setData" {
 		return s.setData(APIstub, args)
-	} else if function == "putObject" {
-		return s.putObject(APIstub, args)
-	} else if function == "getObject" {
-		return s.getObject(APIstub, args)
 	} else if function == "listRequests" {
 		return s.listRequests(APIstub, args)
 	} else if function == "listDocuments" {
