@@ -95,6 +95,86 @@ type Car struct {
 	Owner  string `json:"owner"`
 }
 
+type CouchQueryBuilder struct {
+	Start string
+	SelectorStart string
+	SelectorBody string
+	SelectorEnd string
+	End string
+}
+
+func newCouchQueryBuilder() (*CouchQueryBuilder) {
+	return &CouchQueryBuilder{Start:"{", SelectorStart:"\"selector\":{", SelectorBody:"", SelectorEnd:"}", End:"}"}
+}
+
+func (q *CouchQueryBuilder) addSelector(key string, value interface{}) *CouchQueryBuilder {
+	if q.SelectorBody != "" {
+		q.SelectorBody = q.SelectorBody + ","
+	}
+	var addedString string
+	switch v := value.(type) {
+	case string:
+		addedString = fmt.Sprintf("\"%s\":\"%v\"", key, value)
+	case []byte:
+		addedString = fmt.Sprintf("\"%s\":\"%v\"", key, value)
+	default:
+		addedString = fmt.Sprintf("\"%s\":%v", key, value)
+		fmt.Printf("%q", v)
+	}
+	q.SelectorBody = q.SelectorBody + addedString
+	return q
+}
+
+func (q *CouchQueryBuilder) addSelectorWithOperator(key string, operator string, value interface{}) *CouchQueryBuilder {
+	if q.SelectorBody != "" {
+		q.SelectorBody = q.SelectorBody + ","
+	}
+	var addedString string
+	switch v := value.(type) {
+	case string:
+		addedString = fmt.Sprintf("\"%s\":{\"%s\":\"%s\"}", key, operator, value)
+	case []byte:
+		addedString = fmt.Sprintf("\"%s\":{\"%s\":\"%s\"}", key, operator, value)
+	default:
+		addedString = fmt.Sprintf("\"%s\":{\"%s\":%v}", key, operator, value)
+		fmt.Printf("%q", v)
+	}
+	q.SelectorBody = q.SelectorBody + addedString
+	return q
+}
+
+func (q *CouchQueryBuilder) getQueryString() string {
+	return q.Start + q.SelectorStart + q.SelectorBody + q.SelectorEnd + q.End
+}
+
+type QueryResponse struct {
+	Key string
+	Record []byte
+	Query *jsonq.JsonQuery
+}
+
+func decodeResponse(jsonResponse []byte) *QueryResponse {
+	data := map[string]interface{}{}
+	dec := json.NewDecoder(strings.NewReader(string(jsonResponse)))
+	err := dec.Decode(&data)
+	if err!=nil {
+		fmt.Println(err.Error())
+	}
+	jq := jsonq.NewQuery(data)
+
+	key, err := jq.String("Key")
+	if err!=nil {
+		fmt.Println(err.Error())
+	}
+	record, err := jq.String("Record")
+	if err!=nil {
+		fmt.Println(err.Error())
+	}
+	recordByteArray := []byte(record)
+
+	return &QueryResponse{Key: key , Record: recordByteArray, Query: jq }
+}
+
 //type QueryBuilder struct {
 //	Query string
 //}
@@ -148,28 +228,25 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 }
 
 func (s *SmartContract) getKeyFromToken(APIstub shim.ChaincodeStubInterface, token string) string {
-	queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Token\":\"%s\"}}", token)
+	//queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Token\":\"%s\"}}", token)
 
-	jsonData, err := firstQueryResultForQueryString(APIstub, queryString)
+	queryString := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Token", token).getQueryString()
+	fmt.Println("Query String: ", queryString)
 
-	data := map[string]interface{}{}
-	dec := json.NewDecoder(strings.NewReader(string(jsonData)))
-	err = dec.Decode(&data)
+	jsonResponse, err := firstQueryResultForQueryString(APIstub, queryString)
 	if err!=nil {
-		fmt.Println(err.Error())
+		fmt.Printf("Error Occured")
+		panic(err)
 	}
-	jq := jsonq.NewQuery(data)
+
+	response := decodeResponse(jsonResponse)
 
 
-	fmt.Println(jsonData);
+	fmt.Println(jsonResponse);
 
 	//[{"Key":"YvSgD5xAV0", "Record":{"Doctype":"user","Email":"tanmoykrishnadas@gmail.com","Key":"YvSgD5xAV0","Name":"Tanmoy Krishna Das","PasswordHash":"ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f","Token":"Bd56ti2SMt"}}]
 
-	key, err := jq.String("Key")
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-
+	key := response.Key
 	return key
 }
 
@@ -573,7 +650,9 @@ func (s *SmartContract) login(APIstub shim.ChaincodeStubInterface, args []string
 		fmt.Println(err.Error())
 	}
 
-	return shim.Success([]byte(token + " " + key))
+	jsonResult:= fmt.Sprintf("{\"token\" : \"%s\" , \"key\" : \"%s\"}", token, key)
+
+	return shim.Success([]byte(jsonResult))
 }
 
 func (s *SmartContract) getObject(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
