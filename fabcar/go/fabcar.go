@@ -29,7 +29,6 @@ package main
  * 2 specific Hyperledger Fabric specific libraries for Smart Contracts
  */
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -81,86 +80,6 @@ type Request struct {
 	SignStatus bool
 }
 
-type CouchQueryBuilder struct {
-	Start string
-	SelectorStart string
-	SelectorBody string
-	SelectorEnd string
-	End string
-}
-
-func newCouchQueryBuilder() *CouchQueryBuilder {
-	return &CouchQueryBuilder{Start:"{", SelectorStart:"\"selector\":{", SelectorBody:"", SelectorEnd:"}", End:"}"}
-}
-
-func (q *CouchQueryBuilder) addSelector(key string, value interface{}) *CouchQueryBuilder {
-	if q.SelectorBody != "" {
-		q.SelectorBody = q.SelectorBody + ","
-	}
-	var addedString string
-	switch v := value.(type) {
-	case string:
-		addedString = fmt.Sprintf("\"%s\":\"%v\"", key, value)
-	case []byte:
-		addedString = fmt.Sprintf("\"%s\":\"%v\"", key, value)
-	default:
-		addedString = fmt.Sprintf("\"%s\":%v", key, value)
-		fmt.Printf("%q", v)
-	}
-	q.SelectorBody = q.SelectorBody + addedString
-	return q
-}
-
-func (q *CouchQueryBuilder) addSelectorWithOperator(key string, operator string, value interface{}) *CouchQueryBuilder {
-	if q.SelectorBody != "" {
-		q.SelectorBody = q.SelectorBody + ","
-	}
-	var addedString string
-	switch v := value.(type) {
-	case string:
-		addedString = fmt.Sprintf("\"%s\":{\"%s\":\"%s\"}", key, operator, value)
-	case []byte:
-		addedString = fmt.Sprintf("\"%s\":{\"%s\":\"%s\"}", key, operator, value)
-	default:
-		addedString = fmt.Sprintf("\"%s\":{\"%s\":%v}", key, operator, value)
-		fmt.Printf("%q", v)
-	}
-	q.SelectorBody = q.SelectorBody + addedString
-	return q
-}
-
-func (q *CouchQueryBuilder) getQueryString() string {
-	return q.Start + q.SelectorStart + q.SelectorBody + q.SelectorEnd + q.End
-}
-
-type QueryResponse struct {
-	Key string
-	Record []byte
-	Query *jsonq.JsonQuery
-}
-
-func decodeSingleResponse(jsonResponse []byte) *QueryResponse {
-	data := map[string]interface{}{}
-	dec := json.NewDecoder(strings.NewReader(string(jsonResponse)))
-	err := dec.Decode(&data)
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	jq := jsonq.NewQuery(data)
-
-	key, err := jq.String("Key")
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	record, err := jq.String("Record")
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	recordByteArray := []byte(record)
-
-	return &QueryResponse{Key: key , Record: recordByteArray, Query: jq }
-}
-
 /*
  * The Init method is called when the Smart Contract "fabcar" is instantiated by the blockchain network
  * Best practice is to have any Ledger initialization in separate function -- see initLedger()
@@ -174,7 +93,6 @@ func (s *SmartContract) Init(APIstub shim.ChaincodeStubInterface) sc.Response {
  * The calling application program has also specified the particular smart contract function to be called, with arguments
  */
 func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response {
-
 	// Retrieve the requested Smart Contract function and arguments
 	function, args := APIstub.GetFunctionAndParameters()
 	// Route to the appropriate handler function to interact with the ledger appropriately
@@ -201,12 +119,10 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 	} else if function == "requestForSignature" {
 		return s.requestForSignature(APIstub, args)
 	}
-
 	return shim.Error("Invalid Smart Contract function name.")
 }
 
 func (s *SmartContract) getKeyFromToken(APIstub shim.ChaincodeStubInterface, token string) string {
-	//queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Token\":\"%s\"}}", token)
 	queryString := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Token", token).getQueryString()
 	fmt.Println("Query String: ", queryString)
 
@@ -215,27 +131,25 @@ func (s *SmartContract) getKeyFromToken(APIstub shim.ChaincodeStubInterface, tok
 		fmt.Printf("Error Occured")
 		panic(err)
 	}
-
 	response := decodeSingleResponse(jsonResponse)
-	fmt.Println(jsonResponse);
-
-	//[{"Key":"YvSgD5xAV0", "Record":{"Doctype":"user","Email":"tanmoykrishnadas@gmail.com","Key":"YvSgD5xAV0","Name":"Tanmoy Krishna Das","PasswordHash":"ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f","Token":"Bd56ti2SMt"}}]
 
 	key := response.Key
 	return key
 }
 
 func (s *SmartContract) listRequests(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	if len(args)!=1 {
+		return shim.Error("Incorrect number of arguments, required 1, given "+strconv.Itoa(len(args)))
+	}
 	token := args[0]
-
 	key := s.getKeyFromToken(APIstub, token)
 
-	documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"request\",\"SignStatus\": false,\"ReceiverKey\":\"%s\"}}", key)
-	jsonData, err := getQueryResultForQueryString(APIstub, documentQuery)
+	//documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"request\",\"SignStatus\": false,\"ReceiverKey\":\"%s\"}}", key)
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SignStatus", false).addSelector("ReceiverKey", key).getQueryString()
+	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
 	if err!=nil {
-		fmt.Println(err.Error())
+		return shim.Error(err.Error())
 	}
-
 	return shim.Success(jsonData)
 }
 
@@ -244,8 +158,9 @@ func (s *SmartContract) listDocuments(APIstub shim.ChaincodeStubInterface, args 
 
 	key := s.getKeyFromToken(APIstub, token)
 
-	documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"document\",\"OwnerKey\": \"%s\"}}", key)
-	jsonData, err := getQueryResultForQueryString(APIstub, documentQuery)
+	//documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"document\",\"OwnerKey\": \"%s\"}}", key)
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "document").addSelector("OwnerKey", key).getQueryString()
+	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
 	if err!=nil {
 		fmt.Println(err.Error())
 	}
@@ -298,7 +213,6 @@ func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []stri
 	jq := jsonq.NewQuery(data)
 	documentKey, err := jq.String("Key")
 	documentData, err := jq.String("Record")
-
 
 	var request Request
 	_ = json.Unmarshal([]byte(documentData), &request)
@@ -398,120 +312,6 @@ func (s *SmartContract) uploadDocument(APIstub shim.ChaincodeStubInterface, args
 		return shim.Error(err.Error())
 	}
 	return shim.Success(nil)
-}
-
-// =========================================================================================
-// getQueryResultForQueryString executes the passed in query string.
-// Result set is built and returned as a byte array containing the JSON results.
-// =========================================================================================
-func getQueryResultForQueryString(stub shim.ChaincodeStubInterface, queryString string) ([]byte, error) {
-
-	fmt.Printf("- getQueryResultForQueryString queryString:\n%s\n", queryString)
-
-	resultsIterator, err := stub.GetQueryResult(queryString)
-	if err != nil {
-		return nil, err
-	}
-	defer resultsIterator.Close()
-
-	buffer, err := constructQueryResponseFromIterator(resultsIterator)
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Printf("- getQueryResultForQueryString queryResult:\n%s\n", buffer.String())
-
-	return buffer.Bytes(), nil
-}
-
-// ===========================================================================================
-// constructQueryResponseFromIterator constructs a JSON array containing query results from
-// a given result iterator
-// ===========================================================================================
-func constructQueryResponseFromIterator(resultsIterator shim.StateQueryIteratorInterface) (*bytes.Buffer, error) {
-	// buffer is a JSON array containing QueryResults
-	var buffer bytes.Buffer
-	buffer.WriteString("[")
-
-	bArrayMemberAlreadyWritten := false
-	for resultsIterator.HasNext() {
-		queryResponse, err := resultsIterator.Next()
-		if err != nil {
-			return nil, err
-		}
-		// Add a comma before array members, suppress it for the first array member
-		if bArrayMemberAlreadyWritten == true {
-			buffer.WriteString(",")
-		}
-		buffer.WriteString("{\"Key\":")
-		buffer.WriteString("\"")
-		buffer.WriteString(queryResponse.Key)
-		buffer.WriteString("\"")
-
-		buffer.WriteString(", \"Record\":")
-		// Record is a JSON object, so we write as-is
-		buffer.WriteString(string(queryResponse.Value))
-		buffer.WriteString("}")
-		bArrayMemberAlreadyWritten = true
-	}
-	buffer.WriteString("]")
-
-	return &buffer, nil
-}
-
-func firstQueryResultForQueryString(stub shim.ChaincodeStubInterface, queryString string) ([]byte, error) {
-
-	fmt.Printf("- getQueryResultForQueryString queryString:\n%s\n", queryString)
-
-	resultsIterator, err := stub.GetQueryResult(queryString)
-	if err != nil {
-		return nil, err
-	}
-	defer resultsIterator.Close()
-
-	buffer, err := firstQueryResponseFromIterator(resultsIterator)
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Printf("- getQueryResultForQueryString queryResult:\n%s\n", buffer.String())
-
-	return buffer.Bytes(), nil
-}
-
-// ===========================================================================================
-// firstQueryResponseFromIterator returns query results from
-// a given result iterator
-// ===========================================================================================
-func firstQueryResponseFromIterator(resultsIterator shim.StateQueryIteratorInterface) (*bytes.Buffer, error) {
-	// buffer is a JSON array containing QueryResults
-	var buffer bytes.Buffer
-
-	bArrayMemberAlreadyWritten := false
-	for resultsIterator.HasNext() {
-		queryResponse, err := resultsIterator.Next()
-		if err != nil {
-			return nil, err
-		}
-		// Add a comma before array members, suppress it for the first array member
-		if bArrayMemberAlreadyWritten == true {
-			buffer.WriteString(",")
-		}
-		buffer.WriteString("{\"Key\":")
-		buffer.WriteString("\"")
-		buffer.WriteString(queryResponse.Key)
-		buffer.WriteString("\"")
-
-		buffer.WriteString(", \"Record\":")
-		// Record is a JSON object, so we write as-is
-		buffer.WriteString(string(queryResponse.Value))
-		buffer.WriteString("}")
-		bArrayMemberAlreadyWritten = true
-
-		break
-	}
-
-	return &buffer, nil
 }
 
 func (s *SmartContract) register(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
