@@ -29,7 +29,6 @@ package main
  * 2 specific Hyperledger Fabric specific libraries for Smart Contracts
  */
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/jmoiron/jsonq"
@@ -52,6 +51,8 @@ type User struct {
 	PasswordHash string
 	Token string
 	Key string
+	EncryptedPrivateKey string
+	PublicKey string
 }
 
 type Document struct {
@@ -315,23 +316,21 @@ func (s *SmartContract) uploadDocument(APIstub shim.ChaincodeStubInterface, args
 }
 
 func (s *SmartContract) register(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-	if len(args) != 3 {
+	if len(args) != 5 {
 		return shim.Error("Incorrect number of arguments, required 3, given "+strconv.Itoa(len(args)))
 	}
 
 	name := args[0]
 	email := args[1]
 	password := args[2]
-
-	h := sha256.New()
-	h.Write([]byte(password))
-	passwordHash := fmt.Sprintf("%x", h.Sum(nil))
+	encPrivKey := args[3]
+	pubKey := args[4]
 
 	token := utils.RandomString()
 
 	key := utils.RandomString()
 
-	user := User{"user", name, email, passwordHash, token, key}
+	user := User{"user", name, email, password, token, key, encPrivKey, pubKey}
 	jsonUser, err := json.Marshal(user)
 	if err!=nil {
 		return shim.Error(err.Error())
@@ -385,11 +384,11 @@ func (s *SmartContract) login(APIstub shim.ChaincodeStubInterface, args []string
 	email := args[0]
 	password := args[1]
 
-	h := sha256.New()
-	h.Write([]byte(password))
-	passwordHash := fmt.Sprintf("%x", h.Sum(nil))
+	//h := sha256.New()
+	//h.Write([]byte(password))
+	//passwordHash := fmt.Sprintf("%x", h.Sum(nil))
 
-	queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Email\":\"%s\",\"PasswordHash\":\"%s\"}}", email, passwordHash)
+	queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Email\":\"%s\",\"PasswordHash\":\"%s\"}}", email, password)
 
 	jsonData, err := getQueryResultForQueryString(APIstub, queryString)
 	if err != nil {
