@@ -77,10 +77,22 @@ type Request struct {
 	Doctype string
 	DocumentName string
 	DocumentKey string
+	DocumentPath string
 	SenderKey string
 	SenderEmail string
 	ReceiverKey string
+	ReceiverEmail string
 	SignStatus bool
+	Key string
+}
+
+type Share struct {
+	Doctype string
+	DocumentName string
+	DocumentPath string
+	ReceiverKey string
+	SenderMail string
+	SenderName string
 	Key string
 }
 
@@ -112,8 +124,8 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.getDataFromArgs(APIstub, args)
 	} else if function == "setData" {
 		return s.setData(APIstub, args)
-	} else if function == "listRequests" {
-		return s.listRequests(APIstub, args)
+	} else if function == "listIncomingRequests" {
+		return s.listIncomingRequests(APIstub, args)
 	} else if function == "listDocuments" {
 		return s.listDocuments(APIstub, args)
 	} else if function == "checkSignature" {
@@ -122,6 +134,12 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.signDoc(APIstub, args)
 	} else if function == "requestForSignature" {
 		return s.requestForSignature(APIstub, args)
+	} else if function == "myReq" {
+		return s.myReq(APIstub, args)
+	} else if function == "shareDocument" {
+		return s.shareDocument(APIstub, args)
+	} else if function == "getShares" {
+		return s.getShares(APIstub, args)
 	}
 	return shim.Error("Invalid Smart Contract function name.")
 }
@@ -141,7 +159,7 @@ func (s *SmartContract) getKeyFromToken(APIstub shim.ChaincodeStubInterface, tok
 	return key
 }
 
-func (s *SmartContract) listRequests(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+func (s *SmartContract) listIncomingRequests(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	if len(args)!=1 {
 		return shim.Error("Incorrect number of arguments, required 1, given "+strconv.Itoa(len(args)))
 	}
@@ -233,60 +251,31 @@ func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []stri
 
 func (s *SmartContract) requestForSignature(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	token := args[0]
-	docHash := args[1]
+	docKey := args[1]
 	emailOfSigner := args[2]
 
 	senderKey := s.getKeyFromToken(APIstub, token)
 
-	queryString := fmt.Sprintf("{\"selector\":{\"Doctype\":\"document\",\"DocHash\":\"%s\",\"OwnerKey\":\"%s\"}}", docHash, senderKey)
+	queryString := newCouchQueryBuilder().addSelector("Doctype", "document").addSelector("Key", docKey).addSelector("OwnerKey", senderKey).getQueryString()
+	jsonData, err := firstQueryValueForQueryString(APIstub, queryString)
+	var document Document
+	_ = json.Unmarshal(jsonData, &document)
 
-	jsonData, err := firstQueryResultForQueryString(APIstub, queryString)
+	receiverQuery := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Email", emailOfSigner).getQueryString()
+	jsonData, err = firstQueryValueForQueryString(APIstub, receiverQuery)
+	var receiver User
+	_ = json.Unmarshal(jsonData, &receiver)
 
-	data := map[string]interface{}{}
-	dec := json.NewDecoder(strings.NewReader(string(jsonData)))
-	err = dec.Decode(&data)
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	jq := jsonq.NewQuery(data)
+	senderQuery := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Key", senderKey).getQueryString()
+	jsonData, err = firstQueryValueForQueryString(APIstub, senderQuery)
+	var sender User
+	_ = json.Unmarshal(jsonData, &sender)
 
-	documentName, err := jq.String("Record", "DocumentName")
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	documentKey, err := jq.String("Key")
-
-
-	receiverQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Email\":\"%s\"}}", emailOfSigner)
-	jsonData, err = firstQueryResultForQueryString(APIstub, receiverQuery)
-
-	data = map[string]interface{}{}
-	dec = json.NewDecoder(strings.NewReader(string(jsonData)))
-	err = dec.Decode(&data)
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	jq = jsonq.NewQuery(data)
-
-	receiverKey, err := jq.String("Key")
-
-	senderQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"user\",\"Key\":\"%s\"}}", senderKey)
-	jsonData, err = firstQueryResultForQueryString(APIstub, senderQuery)
-
-	data = map[string]interface{}{}
-	dec = json.NewDecoder(strings.NewReader(string(jsonData)))
-	err = dec.Decode(&data)
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	jq = jsonq.NewQuery(data)
-	senderEmail, err := jq.String("Record", "Email")
 
 	requestKey := utils.RandomString()
-	request := Request{"request", documentName, documentKey, senderKey, senderEmail, receiverKey, false, requestKey}
+	request := Request{"request", document.DocName, document.Key, document.DocPath, sender.Key, sender.Email, receiver.Key, receiver.Email, false, requestKey}
 
 	jsonRequest, err := json.Marshal(request)
-
 
 	err = APIstub.PutState(requestKey, jsonRequest)
 	if err!=nil {
@@ -486,6 +475,58 @@ func (s *SmartContract) setData(APIstub shim.ChaincodeStubInterface, args []stri
 	str := "operation successful"
 
 	return shim.Success([]byte(str))
+}
+
+func (s *SmartContract) myReq(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	token := args[0]
+	senderKey := s.getKeyFromToken(APIstub, token)
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SignStatus", false).addSelector("SenderKey", senderKey).getQueryString()
+	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
+	if err!=nil {
+		return shim.Error(err.Error())
+	}
+	return shim.Success(jsonData)
+}
+
+func (s *SmartContract) getShares(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	token := args[0]
+	senderKey := s.getKeyFromToken(APIstub,token)
+
+	shareQuery := newCouchQueryBuilder().addSelector("Doctype", "share").addSelector("ReceiverKey", senderKey).getQueryString()
+	jsonShares, _ := getJSONQueryResultForQueryString(APIstub, shareQuery)
+
+	return shim.Success(jsonShares)
+}
+
+func (s *SmartContract) shareDocument(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	token := args[0]
+	receiverEmail := args[1]
+	documentKey := args[2]
+
+	senderKey := s.getKeyFromToken(APIstub,token)
+
+	receiverQuery := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Email", receiverEmail).getQueryString()
+	jsonData, _ := firstQueryValueForQueryString(APIstub, receiverQuery)
+	var receiver User
+	_ = json.Unmarshal(jsonData, &receiver)
+
+	senderQuery := newCouchQueryBuilder().addSelector("Doctype", "user").addSelector("Key", senderKey).getQueryString()
+	jsonSenderData, _ := firstQueryValueForQueryString(APIstub, senderQuery)
+	var sender User
+	_ = json.Unmarshal(jsonSenderData, &sender)
+
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "document").addSelector("Key", documentKey).getQueryString()
+	jsonDocumentData, _ := firstQueryValueForQueryString(APIstub, documentQuery)
+	var document Document
+	_ = json.Unmarshal(jsonDocumentData, &document)
+
+	share := Share{"share", document.DocName, document.DocPath, receiver.Key, sender.Email, sender.Name, utils.RandomString()}
+	jsonShare, _ := json.Marshal(share)
+	err := APIstub.PutState(share.Key, jsonShare)
+	if err!=nil {
+		return shim.Error(err.Error())
+	}
+	return shim.Success(jsonShare)
 }
 
 func MockInvoke(stub *shim.MockStub, function string, args []string) sc.Response {

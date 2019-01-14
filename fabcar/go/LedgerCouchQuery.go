@@ -15,6 +15,22 @@ type QueryResponse struct {
 	Query *jsonq.JsonQuery
 }
 
+func firstQueryValueForQueryString(stub shim.ChaincodeStubInterface, queryString string) ([]byte, error) {
+	resultsIterator, err := stub.GetQueryResult(queryString)
+	if err != nil {
+		return nil, err
+	}
+	// for i:=0; resultsIterator.HasNext(); i++ {
+	// 	data := resultsIterator.Next()
+	// }
+	data, err := resultsIterator.Next()
+	if err != nil {
+		return nil, err
+	}
+	value := data.Value
+	return value, nil
+}
+
 func decodeSingleResponse(jsonResponse []byte) *QueryResponse {
 	data := map[string]interface{}{}
 	dec := json.NewDecoder(strings.NewReader(string(jsonResponse)))
