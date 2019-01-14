@@ -31,13 +31,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jmoiron/jsonq"
-	"strconv"
-	"strings"
-
 	"github.com/cd1/utils-golang"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	sc "github.com/hyperledger/fabric/protos/peer"
+	"github.com/jmoiron/jsonq"
+	"strconv"
+	"strings"
 )
 
 // Define the Smart Contract structure
@@ -59,7 +58,9 @@ type Document struct {
 	Doctype string
 	DocHash string
 	DocName string
+	DocPath string
 	OwnerKey string
+	Key string
 }
 
 type Signature struct {
@@ -69,6 +70,7 @@ type Signature struct {
 	StatusCode string
 	Message string
 	SignerKey string
+	Key string
 }
 
 type Request struct {
@@ -79,6 +81,7 @@ type Request struct {
 	SenderEmail string
 	ReceiverKey string
 	SignStatus bool
+	Key string
 }
 
 /*
@@ -192,8 +195,9 @@ func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []stri
 
 	key := s.getKeyFromToken(APIstub, token)
 
-	signature := Signature{"signature", docHash, message, message, message, key}
 	signatureKey := utils.RandomString()
+	signature := Signature{"signature", docHash, message, message, message, key, signatureKey}
+
 	jsonSignature, err := json.Marshal(signature)
 	err = APIstub.PutState(signatureKey, jsonSignature)
 	if err!=nil {
@@ -278,11 +282,12 @@ func (s *SmartContract) requestForSignature(APIstub shim.ChaincodeStubInterface,
 	jq = jsonq.NewQuery(data)
 	senderEmail, err := jq.String("Record", "Email")
 
-	request := Request{"request", documentName, documentKey, senderKey, senderEmail, receiverKey, false}
+	requestKey := utils.RandomString()
+	request := Request{"request", documentName, documentKey, senderKey, senderEmail, receiverKey, false, requestKey}
 
 	jsonRequest, err := json.Marshal(request)
 
-	requestKey := utils.RandomString()
+
 	err = APIstub.PutState(requestKey, jsonRequest)
 	if err!=nil {
 		return shim.Error(err.Error())
@@ -291,24 +296,28 @@ func (s *SmartContract) requestForSignature(APIstub shim.ChaincodeStubInterface,
 }
 
 func (s *SmartContract) uploadDocument(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-	if len(args) != 3 {
+	if len(args) != 4 {
 		return shim.Error("Incorrect number of arguments, required 3, given "+strconv.Itoa(len(args)))
 	}
 
 	ownerToken := args[0]
 	docName := args[1]
 	docHash := args[2]
+	docPath := args[3]
 
+	//return shim.Success(nil)
+	//ownerKey := ownerToken
 	ownerKey := s.getKeyFromToken(APIstub, ownerToken)
 
-	document := Document{"document", docHash, docName, ownerKey}
+	documentKey := utils.RandomString()
+	document := Document{"document", docHash, docName, docPath, ownerKey, documentKey}
 
 	jsonDoc, err := json.Marshal(document)
 	if err!=nil {
 		return shim.Error(err.Error())
 	}
 
-	err = APIstub.PutState(docHash, jsonDoc)
+	err = APIstub.PutState(documentKey, jsonDoc)
 	if err!=nil {
 		return shim.Error(err.Error())
 	}
