@@ -65,11 +65,13 @@ type Document struct {
 
 type Signature struct {
 	Doctype string
+	DocKey string
 	DocHash string
 	Signature string
 	StatusCode string
 	Message string
 	SignerKey string
+	SignerPublicKey string
 	Key string
 }
 
@@ -77,10 +79,13 @@ type Request struct {
 	Doctype string
 	DocumentName string
 	DocumentKey string
+	DocumentHash string
 	DocumentPath string
 	SenderKey string
+	SenderName string
 	SenderEmail string
 	ReceiverKey string
+	ReceiverName string
 	ReceiverEmail string
 	SignStatus bool
 	Key string
@@ -124,14 +129,8 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.getDataFromArgs(APIstub, args)
 	} else if function == "setData" {
 		return s.setData(APIstub, args)
-	} else if function == "listIncomingRequests" {
-		return s.listIncomingRequests(APIstub, args)
 	} else if function == "listDocuments" {
 		return s.listDocuments(APIstub, args)
-	} else if function == "checkSignature" {
-		return s.checkSignature(APIstub, args)
-	} else if function == "signDoc" {
-		return s.signDoc(APIstub, args)
 	} else if function == "requestForSignature" {
 		return s.requestForSignature(APIstub, args)
 	} else if function == "myReq" {
@@ -140,6 +139,16 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 		return s.shareDocument(APIstub, args)
 	} else if function == "getShares" {
 		return s.getShares(APIstub, args)
+	} else if function == "listIncomingRequests" {
+		return s.listIncomingRequests(APIstub, args)
+	} else if function == "getUserFromToken" {
+		return s.getUserFromToken(APIstub, args)
+	} else if function == "checkSignature" {
+		return s.checkSignature(APIstub, args)
+	} else if function == "signDoc" {
+		return s.signDoc(APIstub, args)
+	} else if function == "getSignatures" {
+		return s.getSignatures(APIstub, args);
 	}
 	return shim.Error("Invalid Smart Contract function name.")
 }
@@ -167,7 +176,7 @@ func (s *SmartContract) listIncomingRequests(APIstub shim.ChaincodeStubInterface
 	key := s.getKeyFromToken(APIstub, token)
 
 	//documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"request\",\"SignStatus\": false,\"ReceiverKey\":\"%s\"}}", key)
-	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SignStatus", false).addSelector("ReceiverKey", key).getQueryString()
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SignStatus", false).addSelector("ReceiverKey", key).addSelector("SignStatus", false).getQueryString()
 	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
 	if err!=nil {
 		return shim.Error(err.Error())
@@ -207,14 +216,22 @@ func (s *SmartContract) checkSignature(APIstub shim.ChaincodeStubInterface, args
 
 func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	token := args[0]
-	docHash := args[1]
-	message := "Attested"
+	docKey := args[1]
+	message := args[2]
+	sign := args[3]
+	docHash := args[4]
+
 	signStatus := true
 
 	key := s.getKeyFromToken(APIstub, token)
 
+	jsonUser, _ := APIstub.GetState(key)
+	var user User
+	_ = json.Unmarshal(jsonUser, &user)
+
+
 	signatureKey := utils.RandomString()
-	signature := Signature{"signature", docHash, message, message, message, key, signatureKey}
+	signature := Signature{"signature", docKey, docHash, sign, message, message, key, user.PublicKey, signatureKey}
 
 	jsonSignature, err := json.Marshal(signature)
 	err = APIstub.PutState(signatureKey, jsonSignature)
@@ -224,24 +241,28 @@ func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []stri
 
 	//senderKey := s.getKeyFromToken(APIstub, token)
 
-	documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"request\",\"DocHash\":\"%s\",\"ReceiverKey\":\"%s\"}}", docHash, key)
-	jsonData, err := firstQueryResultForQueryString(APIstub, documentQuery)
 
-	data := map[string]interface{}{}
-	dec := json.NewDecoder(strings.NewReader(string(jsonData)))
-	err = dec.Decode(&data)
-	if err!=nil {
-		fmt.Println(err.Error())
-	}
-	jq := jsonq.NewQuery(data)
-	documentKey, err := jq.String("Key")
-	documentData, err := jq.String("Record")
+	//documentQuery := fmt.Sprintf("{\"selector\":{\"Doctype\":\"request\",\"DocHash\":\"%s\",\"ReceiverKey\":\"%s\"}}", docKey, key)
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("DocumentHash", docHash).addSelector("ReceiverKey", key).addSelector("DocumentKey", docKey).getQueryString()
+	documentData, _ := firstQueryValueForQueryString(APIstub, documentQuery)
+
+	//jsonData, err := firstQueryResultForQueryString(APIstub, documentQuery)
+	//
+	//data := map[string]interface{}{}
+	//dec := json.NewDecoder(strings.NewReader(string(jsonData)))
+	//err = dec.Decode(&data)
+	//if err!=nil {
+	//	fmt.Println(err.Error())
+	//}
+	//jq := jsonq.NewQuery(data)
+	//documentKey, err := jq.String("Key")
+	//documentData, err := jq.String("Record")
 
 	var request Request
-	_ = json.Unmarshal([]byte(documentData), &request)
+	_ = json.Unmarshal(documentData, &request)
 	request.SignStatus = signStatus
 	newDocumentData, _ := json.Marshal(request)
-	err = APIstub.PutState(documentKey, newDocumentData)
+	err = APIstub.PutState(request.Key, newDocumentData)
 	if err!=nil {
 		fmt.Println("signing error")
 	}
@@ -273,7 +294,7 @@ func (s *SmartContract) requestForSignature(APIstub shim.ChaincodeStubInterface,
 
 
 	requestKey := utils.RandomString()
-	request := Request{"request", document.DocName, document.Key, document.DocPath, sender.Key, sender.Email, receiver.Key, receiver.Email, false, requestKey}
+	request := Request{"request", document.DocName, document.Key, document.DocHash, document.DocPath, sender.Key, sender.Name, sender.Email, receiver.Key, receiver.Name, receiver.Email, false, requestKey}
 
 	jsonRequest, err := json.Marshal(request)
 
@@ -477,10 +498,20 @@ func (s *SmartContract) setData(APIstub shim.ChaincodeStubInterface, args []stri
 	return shim.Success([]byte(str))
 }
 
+func (s *SmartContract) getSignatures(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	docKey := args[0]
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "signature").addSelector("DocKey", docKey).getQueryString()
+	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
+	if err!=nil {
+		return shim.Error(err.Error())
+	}
+	return shim.Success(jsonData)
+}
+
 func (s *SmartContract) myReq(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	token := args[0]
 	senderKey := s.getKeyFromToken(APIstub, token)
-	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SignStatus", false).addSelector("SenderKey", senderKey).getQueryString()
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "request").addSelector("SenderKey", senderKey).getQueryString()
 	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
 	if err!=nil {
 		return shim.Error(err.Error())
@@ -528,6 +559,15 @@ func (s *SmartContract) shareDocument(APIstub shim.ChaincodeStubInterface, args 
 	}
 	return shim.Success(jsonShare)
 }
+
+func (s *SmartContract) getUserFromToken(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+	token := args[0]
+	userKey := s.getKeyFromToken(APIstub,token)
+	jsonUser, _ := APIstub.GetState(userKey)
+	return shim.Success(jsonUser)
+}
+
+
 
 func MockInvoke(stub *shim.MockStub, function string, args []string) sc.Response {
 	input := args
