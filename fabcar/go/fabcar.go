@@ -72,6 +72,8 @@ type Signature struct {
 	Message string
 	SignerKey string
 	SignerPublicKey string
+	SignerName string
+	SignerEmail string
 	Key string
 }
 
@@ -93,6 +95,7 @@ type Request struct {
 
 type Share struct {
 	Doctype string
+	DocumentKey string
 	DocumentName string
 	DocumentPath string
 	ReceiverKey string
@@ -231,7 +234,7 @@ func (s *SmartContract) signDoc(APIstub shim.ChaincodeStubInterface, args []stri
 
 
 	signatureKey := utils.RandomString()
-	signature := Signature{"signature", docKey, docHash, sign, message, message, key, user.PublicKey, signatureKey}
+	signature := Signature{"signature", docKey, docHash, sign, message, message, key, user.PublicKey, user.Name, user.Email, signatureKey}
 
 	jsonSignature, err := json.Marshal(signature)
 	err = APIstub.PutState(signatureKey, jsonSignature)
@@ -500,7 +503,9 @@ func (s *SmartContract) setData(APIstub shim.ChaincodeStubInterface, args []stri
 
 func (s *SmartContract) getSignatures(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	docKey := args[0]
-	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "signature").addSelector("DocKey", docKey).getQueryString()
+	docHash := args[1]
+
+	documentQuery := newCouchQueryBuilder().addSelector("Doctype", "signature").addSelector("DocKey", docKey).addSelector("DocHash", docHash).getQueryString()
 	jsonData, err := getJSONQueryResultForQueryString(APIstub, documentQuery)
 	if err!=nil {
 		return shim.Error(err.Error())
@@ -521,9 +526,9 @@ func (s *SmartContract) myReq(APIstub shim.ChaincodeStubInterface, args []string
 
 func (s *SmartContract) getShares(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 	token := args[0]
-	senderKey := s.getKeyFromToken(APIstub,token)
+	userKey := s.getKeyFromToken(APIstub,token)
 
-	shareQuery := newCouchQueryBuilder().addSelector("Doctype", "share").addSelector("ReceiverKey", senderKey).getQueryString()
+	shareQuery := newCouchQueryBuilder().addSelector("Doctype", "share").addSelector("ReceiverKey", userKey).getQueryString()
 	jsonShares, _ := getJSONQueryResultForQueryString(APIstub, shareQuery)
 
 	return shim.Success(jsonShares)
@@ -551,7 +556,7 @@ func (s *SmartContract) shareDocument(APIstub shim.ChaincodeStubInterface, args 
 	var document Document
 	_ = json.Unmarshal(jsonDocumentData, &document)
 
-	share := Share{"share", document.DocName, document.DocPath, receiver.Key, sender.Email, sender.Name, utils.RandomString()}
+	share := Share{"share", document.Key, document.DocName, document.DocPath, receiver.Key, sender.Email, sender.Name, utils.RandomString()}
 	jsonShare, _ := json.Marshal(share)
 	err := APIstub.PutState(share.Key, jsonShare)
 	if err!=nil {
